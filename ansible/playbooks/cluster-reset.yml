@@ -1,0 +1,40 @@
+---
+# Reset cluster (use with caution!)
+# This will completely destroy the Kubernetes cluster
+
+- name: Reset Kubernetes cluster
+  hosts: k8s_cluster
+  become: yes
+  tasks:
+    - name: Reset kubeadm
+      command: kubeadm reset -f
+      ignore_errors: yes
+
+    - name: Remove Kubernetes configuration
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/kubernetes
+        - /var/lib/kubelet
+        - /var/lib/etcd
+        - "/home/{{ kubectl_user }}/.kube"
+
+    - name: Remove CNI configuration
+      file:
+        path: /etc/cni/net.d
+        state: absent
+
+    - name: Flush iptables rules
+      command: "{{ item }}"
+      loop:
+        - iptables -F
+        - iptables -t nat -F
+        - iptables -t mangle -F
+        - iptables -X
+      ignore_errors: yes
+
+    - name: Restart containerd
+      systemd:
+        name: containerd
+        state: restarted

@@ -1,0 +1,96 @@
+---
+- name: Check if cluster is already initialized
+  stat:
+    path: /etc/kubernetes/admin.conf
+  register: kubeadm_init
+
+- name: Initialize Kubernetes cluster (primary control plane)
+  command: >
+    kubeadm init
+    --control-plane-endpoint={{ control_plane_endpoint }}:6443
+    --pod-network-cidr={{ pod_cidr }}
+    --service-cidr={{ service_cidr }}
+    --upload-certs
+  register: kubeadm_init_output
+  when:
+    - inventory_hostname == groups['primary_control_plane'][0]
+    - not kubeadm_init.stat.exists
+
+- name: Create .kube directory for user
+  file:
+    path: "/home/{{ kubectl_user }}/.kube"
+    state: directory
+    owner: "{{ kubectl_user }}"
+    group: "{{ kubectl_user }}"
+    mode: '0755'
+  when: inventory_hostname == groups['primary_control_plane'][0]
+
+- name: Copy admin.conf to user's kube config
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "/home/{{ kubectl_user }}/.kube/config"
+    remote_src: yes
+    owner: "{{ kubectl_user }}"
+    group: "{{ kubectl_user }}"
+    mode: '0600'
+  when: inventory_hostname == groups['primary_control_plane'][0]
+
+- name: Wait for API server to be ready
+  wait_for:
+    port: 6443
+    delay: 10
+    timeout: 300
+  when:
+    - inventory_hostname == groups['primary_control_plane'][0]
+    - kubeadm_init_output.changed | default(false)
+
+- name: Install Calico operator
+  become_user: "{{ kubectl_user }}"
+  shell: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml
+  args:
+    chdir: "/home/{{ kubectl_user }}"
+  when:
+    - inventory_hostname == groups['primary_control_plane'][0]
+    - cni_plugin == "calico"
+    - kubeadm_init_output.changed | default(false)
+  ignore_errors: yes
+
+- name: Install Calico custom resources
+  become_user: "{{ kubectl_user }}"
+  shell: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/custom-resources.yaml
+  args:
+    chdir: "/home/{{ kubectl_user }}"
+  when:
+    - inventory_hostname == groups['primary_control_plane'][0]
+    - cni_plugin == "calico"
+    - kubeadm_init_output.changed | default(false)
+  ignore_errors: yes
+
+- name: Generate join command for workers
+  command: kubeadm token create --print-join-command
+  register: join_command_raw
+  when: inventory_hostname == groups['primary_control_plane'][0]
+  changed_when: false
+
+- name: Set join command fact
+  set_fact:
+    kubeadm_join_command: "{{ join_command_raw.stdout }}"
+  when:
+    - inventory_hostname == groups['primary_control_plane'][0]
+    - join_command_raw.stdout is defined
+
+- name: Generate certificate key for control plane join
+  command: kubeadm init phase upload-certs --upload-certs
+  register: cert_key_output
+  when:
+    - inventory_hostname == groups['primary_control_plane'][0]
+    - groups['control_plane'] | length > 1
+  changed_when: false
+
+- name: Extract certificate key
+  set_fact:
+    certificate_key: "{{ cert_key_output.stdout_lines[-1] }}"
+  when:
+    - inventory_hostname == groups['primary_control_plane'][0]
+    - cert_key_output.stdout is defined
+    - groups['control_plane'] | length > 1

@@ -1,0 +1,27 @@
+---
+# Kubernetes versions
+kubernetes_version: "1.29"
+kubernetes_apt_version: "1.29.0-1.1"
+
+# Container runtime
+containerd_version: "1.7"
+
+# Network configuration
+pod_cidr: "192.168.0.0/16"
+service_cidr: "10.96.0.0/12"
+cluster_dns: "10.96.0.10"
+
+# CNI configuration
+cni_plugin: "calico"
+calico_version: "v3.27.0"
+
+# Cluster settings
+cluster_name: "k8s-prod"
+control_plane_endpoint: "{{ hostvars[groups['primary_control_plane'][0]]['private_ip'] }}"
+
+# System settings
+disable_swap: true
+load_kernel_modules: true
+
+# User to run kubectl
+kubectl_user: ubuntu
