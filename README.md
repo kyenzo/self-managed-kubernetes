@@ -21,38 +21,54 @@ Infrastructure as Code for deploying a self-managed Kubernetes cluster on AWS EC
 - [Terraform](https://www.terraform.io/) >= 1.5.0
 - [Ansible](https://www.ansible.com/) >= 2.14
 - [AWS CLI](https://aws.amazon.com/cli/) configured with credentials
-- [jq](https://stedolan.github.io/jq/) for inventory generation
 
-## Quick Start
-
-```bash
-# Clone and deploy
-./scripts/deploy.sh
-```
-
-## Manual Deployment
+## Deployment
 
 ### 1. Provision Infrastructure
 
 ```bash
 cd terraform/env/prod
 terraform init
-terraform plan
 terraform apply
 ```
 
-### 2. Generate Ansible Inventory
+### 2. Configure Ansible Inventory
 
+Get the IPs from Terraform:
 ```bash
-./scripts/generate-inventory.sh
+terraform output control_plane_public_ips
+terraform output control_plane_private_ips
+terraform output worker_public_ips
+terraform output worker_private_ips
 ```
 
-### 3. Configure Cluster
+Edit `ansible/inventory/hosts.ini` and fill in the IPs:
+```ini
+[control_plane]
+cp1 ansible_host=<public_ip_1> private_ip=<private_ip_1>
+cp2 ansible_host=<public_ip_2> private_ip=<private_ip_2>
+
+[workers]
+worker1 ansible_host=<public_ip_1> private_ip=<private_ip_1>
+worker2 ansible_host=<public_ip_2> private_ip=<private_ip_2>
+worker3 ansible_host=<public_ip_3> private_ip=<private_ip_3>
+
+[k8s_cluster:children]
+control_plane
+workers
+
+[primary_control_plane]
+cp1
+```
+
+### 3. Deploy Kubernetes Cluster
 
 ```bash
 cd ansible
 ansible-playbook playbooks/site.yml
 ```
+
+This installs containerd, Kubernetes packages, initializes the control plane with Calico CNI, and joins all worker nodes.
 
 ## Access the Cluster
 
@@ -102,16 +118,15 @@ kubectl get nodes -w
 │   │   ├── ssh-key/          # SSH key pair
 │   │   └── ec2/              # EC2 instances
 │   └── env/prod/             # Production environment
-├── ansible/
-│   ├── inventory/            # Hosts and group vars
-│   ├── roles/                # Ansible roles
-│   │   ├── common/           # System preparation
-│   │   ├── container-runtime/# containerd
-│   │   ├── kubernetes/       # kubeadm, kubelet, kubectl
-│   │   ├── control-plane/    # Cluster init, Calico
-│   │   └── worker/           # Worker join
-│   └── playbooks/            # Deployment playbooks
-└── scripts/                  # Helper scripts
+└── ansible/
+    ├── inventory/            # Hosts and group vars
+    ├── roles/                # Ansible roles
+    │   ├── common/           # System preparation
+    │   ├── container-runtime/# containerd
+    │   ├── kubernetes/       # kubeadm, kubelet, kubectl
+    │   ├── control-plane/    # Cluster init, Calico
+    │   └── worker/           # Worker join
+    └── playbooks/            # Deployment playbooks
 ```
 
 ## Configuration
@@ -134,10 +149,17 @@ service_cidr = "10.96.0.0/12"
 
 ## Cleanup
 
+### Option 1: Reset Cluster (keep VMs running)
 ```bash
-./scripts/destroy.sh
-# or
-cd terraform/env/prod && terraform destroy
+cd ansible
+ansible-playbook playbooks/cluster-reset.yml
+# Then redeploy with: ansible-playbook playbooks/site.yml
+```
+
+### Option 2: Destroy Everything
+```bash
+cd terraform/env/prod
+terraform destroy
 ```
 
 ## Network CIDRs
