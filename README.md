@@ -163,3 +163,4 @@ cd terraform/env/prod && terraform destroy
 | 30000-32767 | TCP | 0.0.0.0/0 | NodePort Services |
 | 179 | TCP | VPC | Calico BGP |
 | 4789 | UDP | VPC | Calico VXLAN |
+
